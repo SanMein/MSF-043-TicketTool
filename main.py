@@ -1,45 +1,67 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
+from dotenv import load_dotenv
 import asyncio
 import os
-from discord.ui import Button, View
 import json
+import aiofiles
 from datetime import datetime
 
-# Настройка бота
+# ============================================================
+# НАСТРОЙКА БОТА
+# ============================================================
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Конфигурация
+
+class AegisBot(commands.Bot):
+    def __init__(self):
+        super().__init__(command_prefix='!', intents=intents)
+
+    async def setup_hook(self):
+        # Регистрируем слеш-команды
+        self.tree.add_command(TicketCommands())
+        await self.tree.sync()
+        print("[Aegis] ✓ Слеш-команды синхронизированы")
+
+
+bot = AegisBot()
+
+# ============================================================
+# КОНФИГУРАЦИЯ
+# ============================================================
 TICKET_FILE = 'tickets.json'
 TICKET_CATEGORY_ID = 1399869304995971316
 ADMIN_ROLE_IDS = [
-    1353493489526243369,  # Администратор
-    1349365796970954833,  # Командный состав 1
-    1349365796970954834  # Командный состав 2
+    1353493489526243369,  # Модератор
+    1349365796970954833,  # Операционный директор
+    1349365796970954834  # Генеральный Директор
 ]
 SEND_CHANNEL_ID = 1349365797658824716
 LOG_CHANNEL_ID = 1399890569165275348
 TICKET_LIMIT = 1000
 HISTORY_LIMIT = 10000
+FOOTER_TEXT = "Aegis // Αιγίς"
+GUILD_ID = 1349365796949856265
 
 
-# Асинхронная загрузка/сохранение данных о тикетах
+# ============================================================
+# ЗАГРУЗКА/СОХРАНЕНИЕ ДАННЫХ
+# ============================================================
 async def load_tickets():
     if os.path.exists(TICKET_FILE):
-        async with aiofiles.open(TICKET_FILE, 'r') as f:
+        async with aiofiles.open(TICKET_FILE, 'r', encoding='utf-8') as f:
             return json.loads(await f.read())
     return {'count': 0, 'last_reset': datetime.now().strftime('%Y-%m-%d'), 'tickets': []}
 
 
 async def save_tickets(data):
-    async with aiofiles.open(TICKET_FILE, 'w') as f:
-        await f.write(json.dumps(data, indent=4))
+    async with aiofiles.open(TICKET_FILE, 'w', encoding='utf-8') as f:
+        await f.write(json.dumps(data, indent=4, ensure_ascii=False))
 
 
-# Проверка сброса лимита тикетов
 async def check_reset():
     tickets = await load_tickets()
     today = datetime.now()
@@ -49,511 +71,467 @@ async def check_reset():
         tickets['last_reset'] = today.strftime('%Y-%m-%d')
         tickets['tickets'] = []
         await save_tickets(tickets)
-        print(
-            f"[DEBUG] Счетчик тикетов сброшен автоматически: {tickets['count']} тикетов, дата сброса: {tickets['last_reset']}")
+        print(f"[Aegis] Счётчик тикетов сброшен: {tickets['count']}, дата: {tickets['last_reset']}")
     return tickets
 
 
-# Класс для кнопок тикетов
-class TicketView(View):
+# ============================================================
+# ЭМБЕДЫ ДЛЯ ТИКЕТОВ
+# ============================================================
+TICKET_EMBEDS = {
+    "admin_complaint": {
+        "title": "🛡️ А.Жалоба",
+        "description": "# ЖАЛОБА НА ДОЛЖНОСТНЫХ ЛИЦ\n\nНастоящий канал предназначен для подачи официальных жалоб на действия должностных лиц ЧВК \"MSF-043\" (включая, но не ограничиваясь: Модераторы, Аналитики, Логисты, Инструкторы, Старшие оперативники, а также вышестоящий командный состав — роли <@&1353493489526243369>, <@&1353493070192050357>, <@&1353492927833178172>, <@&1349365796970954832>, <@&1349365796970954833>).\n\n## ФОРМА ЖАЛОБЫ\n### РАЗДЕЛ 1. ДАННЫЕ ЗАЯВИТЕЛЯ\n> **1.1. Позывной заявителя:**  \n> [Укажите ваш позывной, используемый на сервере Discord]\n> **1.2. Должность в ЧВК (при наличии):**  \n> [Укажите вашу должность / корпус / грейд]\n> **1.3. Срок службы в ЧВК:**  \n> [Укажите количество недель / месяцев / лет]\n\n### РАЗДЕЛ 2. СУЩЕСТВО ЖАЛОБЫ\n> **2.1. Данные должностного лица, в отношении которого подаётся жалоба:**  \n> [Укажите: позывной, никнейм в Discord, занимаемую должность]\n> **2.2. Характер нарушения:**  \n> [Опишите, что именно сделало или не сделало должностное лицо, какие нормы Регламента, Положений или должностной инструкции были нарушены]\n> **2.3. Обстоятельства инцидента (подробно):**  \n> [Изложите событие чётко, последовательно и фактологически – время, место, участники, последствия, наличие свидетелей]\n> **2.4. Доказательства:**  \n> [Приложите изображения, видеозаписи, ссылки на ресурсы, логи переписки. Если материалы блокируются системой, направьте их в личные сообщения курирующему Модератору]\n\n### РАЗДЕЛ 3. ЗАКЛЮЧЕНИЕ\nПосле заполнения всех разделов формы упомяните любое должностное лицо командного состава (<@&1349365796970954833>, <@&1349365796970954834>) или Модератора (<@&1353493489526243369>) для рассмотрения жалобы.",
+        "thumbnail": "https://i.imgur.com/xeORxhD.jpeg",
+        "color": 0xFF4444,
+        "emoji": "🛡️"
+    },
+    "op_complaint": {
+        "title": "👤 О.Жалоба",
+        "description": "# ЖАЛОБА НА ЛИЧНЫЙ СОСТАВ\n\nНастоящий канал предназначен для подачи официальных жалоб на действия штатных оперативников ЧВК \"MSF-043\" (роли <@&1349365796949856273>, <@&1349365796949856274>).\n\n## ФОРМА ЖАЛОБЫ\n### РАЗДЕЛ 1. ДАННЫЕ ЗАЯВИТЕЛЯ\n> **1.1. Позывной заявителя:**  \n> [Укажите ваш позывной, используемый на сервере Discord или в Roblox]\n> **1.2. Должность в ЧВК (при наличии):**  \n> [Укажите вашу должность / корпус / грейд]\n> **1.3. Срок службы в ЧВК:**  \n> [Укажите количество недель / месяцев / лет]\n\n### РАЗДЕЛ 2. СУЩЕСТВО ЖАЛОБЫ\n> **2.1. Данные оперативника, в отношении которого подаётся жалоба:**  \n> [Укажите: упоминание через @, позывной, никнейм в Discord, Discord ID]\n> **2.2. Характер нарушения:**  \n> [Опишите, что именно сделал или не сделал оперативник, какие нормы Регламента или Положений были нарушены]\n> **2.3. Обстоятельства инцидента (подробно):**  \n> [Изложите событие чётко, последовательно и фактологически – время, место, участники, последствия]\n> **2.4. Доказательства:**  \n> [Приложите изображения, видеозаписи, ссылки на ресурсы. Если материалы блокируются системой, направьте их в личные сообщения курирующему Модератору]\n\n### РАЗДЕЛ 3. ЗАКЛЮЧЕНИЕ\n\nПосле заполнения всех разделов формы упомяните любое должностное лицо командного состава (<@&1349365796970954833>, <@&1349365796970954834>) или Модератора (<@&1353493489526243369>).",
+        "thumbnail": "https://i.imgur.com/xeORxhD.jpeg",
+        "color": 0xFFA500,
+        "emoji": "👤"
+    },
+    "suggestion": {
+        "title": "💡 Идея",
+        "description": "# ПРЕДЛОЖЕНИЕ ПО РАЗВИТИЮ ЧВК\n\nНастоящий канал предназначен для подачи официальных предложений, касающихся структуры, механизмов функционирования, обновлений регламентной базы и иных аспектов деятельности ЧВК \"MSF-043\".\n\n## ФОРМА ПРЕДЛОЖЕНИЯ\n### РАЗДЕЛ 1. ДАННЫЕ ЗАЯВИТЕЛЯ\n> **1.1. Позывной заявителя:**  \n> [Укажите ваш позывной, используемый на сервере Discord]\n> **1.2. Должность в ЧВК (при наличии):**  \n> [Укажите вашу должность / корпус / грейд]\n> **1.3. Срок службы в ЧВК:**  \n> [Укажите количество недель / месяцев / лет]\n\n### РАЗДЕЛ 2. ОЦЕНКА И ПРЕДЛОЖЕНИЕ\n> **2.1. Область предложения:**  \n> [Укажите, какой именно элемент структуры или деятельности Компании затрагивает предложение: каналы связи, оформление сервера, сайт регистратуры, система грейдирования, регламенты, тактические процедуры, техническое обеспечение и т.п.]\n> **2.2. Анализ текущего состояния:**  \n> [Оцените текущее положение дел в указанной области: что работает эффективно, что требует улучшения, насколько вы удовлетворены существующим положением]\n> **2.3. Суть предложения (подробно):**  \n> [Изложите предложение развёрнуто, с указанием проблемы и способа её решения. Рекомендуется придерживаться структуры: текущая проблема → желаемое состояние → конкретные шаги по достижению]\n> **2.4. Обоснование целесообразности (при наличии):**  \n> [Поясните, почему данное предложение должно быть принято, какие выгоды или улучшения оно принесёт Компании]\n\n### РАЗДЕЛ 3. ЗАКЛЮЧЕНИЕ\nПосле заполнения всех разделов формы упомяните любое должностное лицо командного состава (<@&1349365796970954833>, <@&1349365796970954834>) или Модератора (<@&1353493489526243369>) для рассмотрения предложения.",
+        "color": 0x44FF44,
+        "emoji": "💡"
+    },
+    "registration": {
+        "title": "📝 Регистрация",
+        "description": "# РЕГИСТРАЦИЯ ОПЕРАТИВНИКА\n\nДля прохождения регистрации в составе ЧВК \"MSF-043\" необходимо выполнить следующие действия в строгом соответствии с установленным порядком.\n\n> **1.** Перейдите на официальный [сайт регистратуры](https://sanmein.github.io/MSF-D-Protocol/).\n> **2.** В поле \"ПОЗЫВНОЙ\" укажите ваш предпочитаемый позывной на кириллице (2–8 символов, только буквы, без цифр).\n> **3.** В поле \"DS-ID\" вставьте ваш полный Discord ID (цифровой идентификатор пользователя).\n> **4.** Выберите корпус, в который вы хотите вступить.\n> **5.** Пролистайте страницу вниз и активируйте кнопку \"СГЕНЕРИРОВАТЬ ОБА КОДА\".\n> **6.** По завершении генерации нажмите кнопку \"РЕГИСТРАЦИЯ\". Требуемые данные (позывной, маскированный DS-ID, код MSF, аудит MSF, аббревиатура корпуса) будут автоматически скопированы в буфер обмена в текстовом формате, а QR-код – в формате изображения.\n> **7.** Вернитесь в канал регистрации Discord и вставьте скопированные данные. QR-код приложите к сообщению в виде изображения.\n> **8.** По окончании процедуры упомяните любого из представителей Административного состава (<@&1349365796970954834>, <@648821656424546324>) и ожидайте подтверждения регистрации.\n\n*__При превышении разумных сроков ожидания допускается повторное упоминание Административного состава (<@&1349365796970954834>, <@648821656424546324>) для ускорения рассмотрения.__*",
+        "thumbnail": "https://i.imgur.com/xeORxhD.jpeg",
+        "color": 0x4488FF,
+        "emoji": "📝"
+    },
+    "diplomacy": {
+        "title": "🤝 Дипломатия",
+        "description": "# Заключение дипломатии\n\nНастоящий тикет предназначен для установления и поддержания дипломатических отношений между ЧВК \"MSF-043\" и внешними субъектами.\n\n## ФОРМА ДИПЛОМАТИЧЕСКОГО ОБРАЩЕНИЯ\n### РАЗДЕЛ 1. ДАННЫЕ СУБЪЕКТА\n> **1.1. Полное наименование субъекта:**  \n> [Укажите официально зарегистрированное наименование]\n> **1.2. Тип субъекта:**  \n> [Частная военная компания / Военная организация / Государственное учреждение / Иное]\n> **1.3. Численность состава:**  \n> [Укажите количество оперативников штатного состава]\n\n### РАЗДЕЛ 2. ДАННЫЕ ПРЕДСТАВИТЕЛЯ\n> **2.1. Позывной представителя:**  \n> [Укажите ваш позывной или имя]\n> **2.2. Занимаемая должность:**  \n> [Укажите вашу должность в составе субъекта]\n> **2.3. Контактные данные:**  \n> [Discord, Roblox, иные платформы]\n\n### РАЗДЕЛ 3. ЦЕЛЬ ОБРАЩЕНИЯ\n> **3.1. Тип дипломатического запроса:**  \n> [Союз / Партнёрство / Нейтралитет / Иное]\n> **3.2. Описание предложения или запроса:**  \n> [Изложите суть дипломатического обращения]\n\n### РАЗДЕЛ 4. ЗАКЛЮЧЕНИЕ\n*После заполнения формы упомяните Генерального Директора (<@1086319338371428372>) или Операционного Директора (<@648821656424546324>) для рассмотрения дипломатического запроса*.",
+        "thumbnail": "https://i.imgur.com/xeORxhD.jpeg",
+        "color": 0xFFD700,
+        "emoji": "🤝"
+    }
+}
+
+
+# ============================================================
+# КЛАССЫ VIEW (КНОПКИ)
+# ============================================================
+class MainTicketView(discord.ui.View):
+    """Главное меню с кнопками тикетов"""
+
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🎟・Тикет", style=discord.ButtonStyle.primary, custom_id="admin_complaint")
-    async def admin_complaint_button(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="🛡️ А.Жалоба", style=discord.ButtonStyle.danger, custom_id="btn_admin_complaint")
+    async def admin_complaint(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        try:
-            await create_ticket(interaction, "admin_complaint")
-        except Exception as e:
-            print(f"[ERROR] Ошибка при создании тикета: {e}")
-            await interaction.followup.send("Произошла ошибка при создании тикета. Проверьте права бота и настройки.",
-                                            ephemeral=True)
+        await create_ticket(interaction, "admin_complaint")
 
-    @discord.ui.button(label="🎫・Тикет", style=discord.ButtonStyle.primary, custom_id="op_complaint")
-    async def op_complaint_button(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="👤 О.Жалоба", style=discord.ButtonStyle.primary, custom_id="btn_op_complaint")
+    async def op_complaint(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        try:
-            await create_ticket(interaction, "op_complaint")
-        except Exception as e:
-            print(f"[ERROR] Ошибка при создании тикета: {e}")
-            await interaction.followup.send("Произошла ошибка при создании тикета. Проверьте права бота и настройки.",
-                                            ephemeral=True)
+        await create_ticket(interaction, "op_complaint")
 
-    @discord.ui.button(label="💡・Тикет", style=discord.ButtonStyle.primary, custom_id="suggestion")
-    async def suggestion_button(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="💡 Идея", style=discord.ButtonStyle.success, custom_id="btn_suggestion")
+    async def suggestion(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        try:
-            await create_ticket(interaction, "suggestion")
-        except Exception as e:
-            print(f"[ERROR] Ошибка при создании тикета: {e}")
-            await interaction.followup.send("Произошла ошибка при создании тикета. Проверьте права бота и настройки.",
-                                            ephemeral=True)
+        await create_ticket(interaction, "suggestion")
 
-    @discord.ui.button(label="🔗・Тикет", style=discord.ButtonStyle.primary, custom_id="registration")
-    async def registration_button(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="📝 Регистрация", style=discord.ButtonStyle.primary, custom_id="btn_registration")
+    async def registration(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        try:
-            await create_ticket(interaction, "registration")
-        except Exception as e:
-            print(f"[ERROR] Ошибка при создании тикета: {e}")
-            await interaction.followup.send("Произошла ошибка при создании тикета. Проверьте права бота и настройки.",
-                                            ephemeral=True)
+        await create_ticket(interaction, "registration")
+
+    @discord.ui.button(label="🤝 Дипломатия", style=discord.ButtonStyle.secondary, custom_id="btn_diplomacy")
+    async def diplomacy(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        await create_ticket(interaction, "diplomacy")
 
 
-# Класс для кнопок в тикетах
-class TicketControlView(View):
-    def __init__(self, ticket_type: str):
+class TicketControlView(discord.ui.View):
+    """Кнопки управления в активном тикете"""
+
+    def __init__(self):
         super().__init__(timeout=None)
-        self.ticket_type = ticket_type
 
-    @discord.ui.button(label="⭕・Закрыть тикет", style=discord.ButtonStyle.danger, custom_id="close_ticket")
-    async def close_button(self, interaction: discord.Interaction, button: Button):
-        print(f"[DEBUG] Пользователь {interaction.user} нажал кнопку закрытия в канале {interaction.channel.name}")
+    @discord.ui.button(label="🔒 Закрыть тикет", style=discord.ButtonStyle.danger, custom_id="btn_close_ticket")
+    async def close_ticket_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        try:
-            await close_ticket(interaction, self.ticket_type)
-        except discord.errors.Forbidden:
-            print(f"[ERROR] Недостаточно прав для изменения канала {interaction.channel.name}")
-            await interaction.followup.send("У бота нет прав для закрытия тикета. Обратитесь к администратору.",
-                                            ephemeral=True)
-        except Exception as e:
-            print(f"[ERROR] Ошибка при закрытии тикета: {e}")
-            await interaction.followup.send("Произошла ошибка при закрытии тикета.", ephemeral=True)
+        await close_ticket(interaction)
 
 
-# Класс для кнопок в закрытых тикетах
-class ClosedTicketView(View):
-    def __init__(self, ticket_type: str):
+class ClosedTicketView(discord.ui.View):
+    """Кнопки управления в закрытом тикете"""
+
+    def __init__(self):
         super().__init__(timeout=None)
-        self.ticket_type = ticket_type
 
-    @discord.ui.button(label="❎・Открыть тикет", style=discord.ButtonStyle.success, custom_id="reopen_ticket")
-    async def reopen_button(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="🔓 Открыть тикет", style=discord.ButtonStyle.success, custom_id="btn_reopen_ticket")
+    async def reopen_ticket_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         channel = interaction.channel
-        user_id = int(channel.name.split('-')[-1])
-        user = interaction.guild.get_member(user_id)
-        if user:
-            await channel.set_permissions(user, read_messages=True, send_messages=True)
+        # Определяем создателя тикета
+        for overwrite in channel.overwrites:
+            if isinstance(overwrite, discord.Member) and overwrite != interaction.guild.me:
+                user = overwrite
+                await channel.set_permissions(user, read_messages=True, send_messages=True)
         for role_id in ADMIN_ROLE_IDS:
             role = interaction.guild.get_role(role_id)
             if role:
                 await channel.set_permissions(role, read_messages=True, send_messages=True)
-        await interaction.response.send_message("Тикет открыт повторно.")
-        print(f"[DEBUG] Тикет {channel.name} открыт повторно пользователем {interaction.user}")
 
-    @discord.ui.button(label="🛑・Логирование", style=discord.ButtonStyle.secondary, custom_id="log_ticket")
-    async def log_button(self, interaction: discord.Interaction, button: Button):
-        if not any(interaction.guild.get_role(role_id) in interaction.user.roles for role_id in ADMIN_ROLE_IDS):
-            await interaction.response.send_message("У вас нет прав для логирования тикета.", ephemeral=True)
+        embed = discord.Embed(
+            title="🔓 Тикет открыт",
+            description="Тикет был открыт повторно.",
+            color=0x00FF00
+        )
+        embed.set_footer(text=FOOTER_TEXT)
+        await interaction.response.send_message(embed=embed, view=TicketControlView())
+
+    @discord.ui.button(label="📋 Логирование", style=discord.ButtonStyle.secondary, custom_id="btn_log_ticket")
+    async def log_ticket_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Проверка прав
+        if not any(interaction.guild.get_role(rid) in interaction.user.roles for rid in ADMIN_ROLE_IDS):
+            await interaction.response.send_message("❌ У вас нет прав для логирования тикета.", ephemeral=True)
             return
+
+        await interaction.response.defer(ephemeral=True)
 
         messages = []
         async for message in interaction.channel.history(limit=HISTORY_LIMIT):
-            messages.append(f'[{message.created_at}] {message.author}: {message.content}')
-        log = '\n'.join(reversed(messages))
-        log_message = f'Лог тикета {interaction.channel.name}:\n'
+            messages.append(f'[{message.created_at.strftime("%d.%m.%Y %H:%M:%S")}] {message.author}: {message.content}')
 
-        if len(log_message + log) > 2000:
-            parts = [log[i:i + 1900] for i in range(0, len(log), 1900)]
+        log_text = '\n'.join(reversed(messages))
+        log_header = f'📋 Лог тикета {interaction.channel.name}\n'
+
+        # Отправка в ЛС
+        if len(log_header + log_text) > 2000:
+            parts = [log_text[i:i + 1900] for i in range(0, len(log_text), 1900)]
             for i, part in enumerate(parts, 1):
-                await interaction.user.send(f'{log_message} (Часть {i})\n```\n{part}\n```')
+                await interaction.user.send(f'{log_header}(Часть {i})\n```\n{part}\n```')
         else:
-            await interaction.user.send(f'{log_message}\n```\n{log}\n```')
+            await interaction.user.send(f'{log_header}\n```\n{log_text}\n```')
 
+        # Отправка в лог-канал
         log_channel = bot.get_channel(LOG_CHANNEL_ID)
         if log_channel:
-            if len(log_message + log) > 2000:
-                parts = [log[i:i + 1900] for i in range(0, len(log), 1900)]
+            if len(log_header + log_text) > 2000:
+                parts = [log_text[i:i + 1900] for i in range(0, len(log_text), 1900)]
                 for i, part in enumerate(parts, 1):
-                    await log_channel.send(f'{log_message} (Часть {i})\n```\n{part}\n```',
-                                           allowed_mentions=discord.AllowedMentions.none())
+                    await log_channel.send(f'{log_header}(Часть {i})\n```\n{part}\n```')
             else:
-                await log_channel.send(f'{log_message}\n```\n{log}\n```',
-                                       allowed_mentions=discord.AllowedMentions.none())
+                await log_channel.send(f'{log_header}\n```\n{log_text}\n```')
 
-        await interaction.response.send_message("Лог тикета отправлен в ваши личные сообщения и в канал логов.",
-                                                ephemeral=True)
-        print(f"[DEBUG] Лог тикета {interaction.channel.name} отправлен пользователю {interaction.user}")
+        await interaction.followup.send("✅ Лог тикета отправлен в ваши личные сообщения и в канал логов.",
+                                        ephemeral=True)
 
-    @discord.ui.button(label="⭕・Удалить тикет", style=discord.ButtonStyle.danger, custom_id="delete_ticket")
-    async def delete_button(self, interaction: discord.Interaction, button: Button):
-        if not any(interaction.guild.get_role(role_id) in interaction.user.roles for role_id in ADMIN_ROLE_IDS):
-            await interaction.response.send_message("У вас нет прав для удаления тикета.", ephemeral=True)
+    @discord.ui.button(label="🗑️ Удалить тикет", style=discord.ButtonStyle.danger, custom_id="btn_delete_ticket")
+    async def delete_ticket_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not any(interaction.guild.get_role(rid) in interaction.user.roles for rid in ADMIN_ROLE_IDS):
+            await interaction.response.send_message("❌ У вас нет прав для удаления тикета.", ephemeral=True)
             return
         await delete_ticket(interaction)
 
 
-# Класс для кнопки отмены удаления
-class CancelDeleteView(View):
-    def __init__(self, ticket_type: str):
+class CancelDeleteView(discord.ui.View):
+    """Кнопка отмены удаления"""
+
+    def __init__(self):
         super().__init__(timeout=60)
-        self.ticket_type = ticket_type
 
-    @discord.ui.button(label="❌・Отменить удаление", style=discord.ButtonStyle.success, custom_id="cancel_delete")
-    async def cancel_delete_button(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="❌ Отменить удаление", style=discord.ButtonStyle.success, custom_id="btn_cancel_delete")
+    async def cancel_delete(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = discord.Embed(
-            title=f"{self.ticket_type}・Тикет жалобы" if self.ticket_type in ["🎟",
-                                                                              "🎫"] else "💡・Тикет предложений" if self.ticket_type == "💡" else "🔗・Тикет регистрации",
+            title="🔒 Тикет закрыт",
             description="Тикет закрыт. Вы можете его открыть повторно или подождать удаления Администратором.",
-            color=16777215
+            color=0x808080
         )
-        embed.set_footer(
-            text="MSF-043 TicketTool"
-        )
-        await interaction.response.edit_message(embed=embed, view=ClosedTicketView(self.ticket_type))
-        print(f"[DEBUG] Удаление тикета {interaction.channel.name} отменено пользователем {interaction.user}")
+        embed.set_footer(text=FOOTER_TEXT)
+        await interaction.response.edit_message(embed=embed, view=ClosedTicketView())
 
 
-# Функция создания тикета
-async def create_ticket(interaction_or_ctx, ticket_type: str):
+# ============================================================
+# ФУНКЦИИ УПРАВЛЕНИЯ ТИКЕТАМИ
+# ============================================================
+async def create_ticket(interaction: discord.Interaction, ticket_type: str):
+    """Создание нового тикета"""
     tickets = await check_reset()
+
     if tickets['count'] >= TICKET_LIMIT:
-        if hasattr(interaction_or_ctx, 'response'):
-            await interaction_or_ctx.followup.send(
-                "Достигнут лимит тикетов (1000). Дождитесь сброса в следующем месяце.", ephemeral=True)
-        else:
-            await interaction_or_ctx.send("Достигнут лимит тикетов (1000). Дождитесь сброса в следующем месяце.")
+        await interaction.followup.send("❌ Достигнут лимит тикетов (1000). Дождитесь сброса в следующем месяце.",
+                                        ephemeral=True)
         return
 
-    guild = interaction_or_ctx.guild if hasattr(interaction_or_ctx, 'guild') else interaction_or_ctx.message.guild
-    user = interaction_or_ctx.user if hasattr(interaction_or_ctx, 'user') else interaction_or_ctx.author
+    guild = interaction.guild
+    user = interaction.user
 
-    # Для регистрационных тикетов используем другой формат названия канала
+    # Проверка на существующий тикет
+    ticket_prefixes = {
+        "admin_complaint": "🛡・а-жалоба",
+        "op_complaint": "👤・о-жалоба",
+        "suggestion": "💡・идея",
+        "registration": "📝・регистрация",
+        "diplomacy": "🤝・дипломатия"
+    }
+
+    prefix = ticket_prefixes.get(ticket_type, ticket_type)
+
+    # Для регистрации проверяем по имени
     if ticket_type == "registration":
-        existing_channel = discord.utils.get(guild.text_channels, name=f'регистрация-{user.name.lower()}')
+        existing = discord.utils.get(guild.text_channels, name=f'{prefix}-{user.name}')
     else:
-        existing_channel = discord.utils.get(guild.text_channels, name=f'ticket-{user.id}')
+        existing = discord.utils.get(guild.text_channels, name=f'{prefix}-{user.name}')
 
-    if existing_channel:
-        if hasattr(interaction_or_ctx, 'response'):
-            await interaction_or_ctx.followup.send(f'У вас уже есть открытый тикет: {existing_channel.mention}',
-                                                   ephemeral=True)
-        else:
-            await interaction_or_ctx.send(f'У вас уже есть открытый тикет: {existing_channel.mention}')
+    if existing:
+        await interaction.followup.send(f'❌ У вас уже есть открытый тикет: {existing.mention}', ephemeral=True)
         return
 
-    category = discord.utils.get(guild.categories, id=TICKET_CATEGORY_ID)
+    category = guild.get_channel(TICKET_CATEGORY_ID)
     if not category:
-        if hasattr(interaction_or_ctx, 'response'):
-            await interaction_or_ctx.followup.send('Категория для тикетов не найдена. Обратитесь к администратору.',
-                                                   ephemeral=True)
-        else:
-            await interaction_or_ctx.send('Категория для тикетов не найдена. Обратитесь к администратору.')
+        await interaction.followup.send('❌ Категория для тикетов не найдена.', ephemeral=True)
         return
 
-    if ticket_type == "admin_complaint":
-        channel_name = f'🎟・Жалоба-{user.id}'
-        embed_data = {
-            "title": "🎟・Тикет жалобы",
-            "description": "# 🎟・Тикет жалобы\n\nЭтот тикет предназначен для публикаций жалобы на должностных лиц (<@&1353493489526243369>, <@&1353493070192050357>, <@&1353492927833178172>, <@&1349365796970954832>, <@&1349365796970954833>)\n\n---\n\n# АНКЕТА ДЛЯ ЗАПОЛНЕНИЯ ЖАЛОБЫ\n## ЛИЧНЫЕ ДАННЫЕ ОТЗЫВЩИКА\n1- [Общий позывной] (в DS-Сервере или свой имя)\n2- [Должность в ЧВК]\n3- [Срок службы] (количество недель/месяцев/лет)\n\n## ЖАЛОБА\n1- [На кого подаётся жалоба] (Упоминание, Позывной, Никнейм в DS, Айди)\n2- [Что именно нарушил или сделал не так на кого подаётся жалоба] (Желательно с указанием)\n3- [Сама причина подачи жалобы] (Подробно, чётко и ясно)\n4- [Доказательства] (Изображения, Видео, Ссылки на ресурсы и т.п.. Если блокируется, то вы должны отправить доказательства в личные сообщения курирующему вас Администратору)\n\n---\n\n***После написания жалобы упомяните любое должностное лицо командного состава (<@&1349365796970954833>, <@&1349365796970954834>) или любого Администратора (<@&1353493489526243369>)***",
-            "color": 16777215,
-            "footer": {"text": "MSF-043 TicketTool"}
-        }
-        emoji = "🎟"
-    elif ticket_type == "op_complaint":
-        channel_name = f'🎫・Жалоба-{user.name}'
-        embed_data = {
-            "title": "🎫・Тикет жалобы",
-            "description": "#🎫・Тикет жалобы\n\nЭтот тикет предназначен для публикаций жалобы на иных оперативников (<@&1349365796949856273>, <@&1349365796949856274>)\n\n---\n\n# АНКЕТА ДЛЯ ЗАПОЛНЕНИЯ ЖАЛОБЫ\n## ЛИЧНЫЕ ДАННЫЕ ОТЗЫВЩИКА\n1- [Общий позывной] (в DS-Сервере или свой имя)\n2- [Должность в ЧВК]\n3- [Срок службы] (количество недель/месяцев/лет)\n\n## ЖАЛОБА\n1- [На кого подаётся жалоба] (Упоминание, Позывной, Никнейм в DS, Айди)\n2- [Что именно нарушил или сделал не так на кого подаётся жалоба] (Желательно с указанием)\n3- [Сама причина подачи жалобы] (Подробно, чётко и ясно)\n4- [Доказательства] (Изображения, Видео, Ссылки на ресурсы и т.п.. Если блокируется, то вы должны отправить доказательства в личные сообщения курирующему вас Администратору)\n\n---\n\n***После написания жалобы упомяните любое должностное лицо командного состава (<@&1349365796970954833>, <@&1349365796970954834>) или любого Администратора (<@&1353493489526243369>)***",
-            "color": 16777215,
-            "footer": {"text": "MSF-043 TicketTool"}
-        }
-        emoji = "🎫"
-    elif ticket_type == "suggestion":
-        channel_name = f'💡・Тикет-{user.name}'
-        embed_data = {
-            "title": "💡・Тикет предложений",
-            "description": "Этот тикет предназначен для публикаций предложения по какому-либо звену, структуре или обновлениям для MSF-043.\n\n---\n\n# АНКЕТА ДЛЯ ПРЕДЛОЖЕНИЯ НА СТРУКТУРУ И УСТРОЙСТВО ЧВК MSF-043\n## ЛИЧНЫЕ ДАННЫЕ ОТЗЫВЩИКА\n1- [Общий позывной] (в DS-Сервере или свой имя)\n2- [Должность в ЧВК]\n3- [Срок службы] (количество недель/месяцев/лет)\n\n## КРАТКАЯ ОЦЕНКА И РЕКОМЕНДАЦИЯ\n1- [На чём именно строится ваше предложение] (каналы, оформление, сайт или т.п.)\n2- [Краткая оценка] (насколько довольны или как вы расцениваете этот раздел)\n3- [Само предложение] (без ограничений по количеству символов или манере речи, старайтесь подробно описать проблему и само предложение)\n\n---\n\n***После написания предложения упомяните любое должностное лицо командного состава (<@&1349365796970954833>, <@&1349365796970954834>) или любого Администратора (<@&1353493489526243369>)***",
-            "color": 16777215,
-            "footer": {"text": "MSF-043 TicketTool"}
-        }
-        emoji = "💡"
-    else:  # registration
-        channel_name = f'🔗・Регистрация-{user.name}'
-        embed_data = {
-            "title": "🔗・Тикет регистрации",
-            "description": "# Регистрация\n\nЗдравия 🙌\nЧтобы пройти регистрацию вам нужно выполнить несколько шагов:\n> - Перейдите на [сайт](https://sanmein.github.io/MSF-D-Protocol/) и нажмите на кнопку \"Сгенерировать оба кода\";\n> - Скопируйте понравившиеся вам код и аудит MSF;\n> - Также скачайте также QR-Код (содержит только код и аудит MSF в текстовом формате, можете не сканировать);\n> - В этом тикете впишите ваш предпочитаемый Позывной, код MSF (который длинный) и аудит MSF (начинается на MSF-D-...) через разделитель `|`, и прикрепите ваш QR-Код.\n> - По окончанию упомяните любого из Административного состава (<@&1349365796970954834>, <@&1349365796970954833>) и ожидайте ответа.\n\n*__Если ожидаете дольше разумного, упомяните снова любого из Административного состава (<@&1349365796970954834>, <@&1349365796970954833>) и ожидайте ответа.__*\n\n*Обратите внимание! Если вы находитесь на сервере только ради Дипломатических отношений, форму заполнять не обязательно. Достаточно указать официально зарегистрированное название своего субъекта, свой позывной (+никнейм через @ если вы продвигаете Roblox), свою должность, которую вы занимаете в своём субъекте, и упомянуть Г.Д. (<@1086319338371428372>) или О.П. (<@&1349365796970954833>)",
-            "color": 16777215,
-            "footer": {"text": "MSF-043 Ticket Tool"}
-        }
-        emoji = "🔗"
+    embed_data = TICKET_EMBEDS[ticket_type]
+
+    # Создание канала
+    if ticket_type == "registration":
+        channel_name = f'{prefix}-{user.name}'
+    else:
+        channel_name = f'{prefix}-{user.name}'
 
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
         user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-        bot.user: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
     }
+
     for role_id in ADMIN_ROLE_IDS:
         role = guild.get_role(role_id)
         if role:
             overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
 
-    channel = await guild.create_text_channel(name=channel_name, category=category, overwrites=overwrites)
+    channel = await guild.create_text_channel(
+        name=channel_name,
+        category=category,
+        overwrites=overwrites
+    )
 
+    # Обновление счётчика
     tickets = await check_reset()
     tickets['count'] += 1
-    tickets['tickets'].append({'user_id': str(user.id), 'ticket_type': ticket_type,
-                               'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                               'channel_name': channel_name})
+    tickets['tickets'].append({
+        'user_id': str(user.id),
+        'user_name': user.name,
+        'ticket_type': ticket_type,
+        'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'channel_name': channel_name
+    })
     await save_tickets(tickets)
-    print(
-        f"[DEBUG] Создан тикет: user_id={user.id}, type={ticket_type}, channel={channel_name}, count={tickets['count']}")
 
-    embed = discord.Embed(title=embed_data["title"], description=embed_data["description"], color=embed_data["color"])
-    if "author" in embed_data:
-        embed.set_author(name=embed_data["author"]["name"], icon_url=embed_data["author"]["icon_url"])
-    if "footer" in embed_data:
-        embed.set_footer(text=embed_data["footer"]["text"])
+    # Отправка эмбеда в канал
+    embed = discord.Embed(
+        title=embed_data["title"],
+        description=embed_data["description"],
+        color=embed_data["color"]
+    )
+    embed.set_footer(text=FOOTER_TEXT)
 
-    view = TicketControlView(emoji)
-    await channel.send(f'{user.mention}, ваш тикет создан!', embed=embed, view=view)
-    if hasattr(interaction_or_ctx, 'response'):
-        await interaction_or_ctx.followup.send(f'Тикет создан: {channel.mention}', ephemeral=True)
-    else:
-        await interaction_or_ctx.send(f'Тикет создан: {channel.mention}')
+    await channel.send(f'{user.mention}, ваш тикет создан!', embed=embed, view=TicketControlView())
+    await interaction.followup.send(f'✅ Тикет создан: {channel.mention}', ephemeral=True)
+
+    print(f"[Aegis] ✓ Тикет создан: {user.name} ({user.name}), тип: {ticket_type}, канал: {channel_name}")
 
 
-# Функция закрытия тикета
-async def close_ticket(interaction_or_ctx, emoji: str):
-    channel = interaction_or_ctx.channel if hasattr(interaction_or_ctx,
-                                                    'channel') else interaction_or_ctx.message.channel
-    print(f"[DEBUG] Закрытие тикета {channel.name}, emoji={emoji}")
-    for overwrite in channel.overwrites:
-        if overwrite is not channel.guild.default_role and overwrite is not bot.user:
+async def close_ticket(interaction: discord.Interaction):
+    """Закрытие тикета"""
+    channel = interaction.channel
+
+    # Закрываем доступ для создателя
+    for overwrite, perms in channel.overwrites.items():
+        if isinstance(overwrite, discord.Member) and overwrite != interaction.guild.me:
             await channel.set_permissions(overwrite, read_messages=True, send_messages=False)
 
-    if emoji == "🔗":
-        title = "🔗・Тикет регистрации"
-    elif emoji in ["🎟", "🎫"]:
-        title = f"{emoji}・Тикет жалобы"
-    else:
-        title = "💡・Тикет предложений"
-
     embed = discord.Embed(
-        title=title,
+        title="🔒 Тикет закрыт",
         description="Тикет закрыт. Вы можете его открыть повторно или подождать удаления Администратором.",
-        color=16777215
+        color=0x808080
     )
-    embed.set_footer(
-        text="MSF-043 TicketTool"
-    )
-    if hasattr(interaction_or_ctx, 'response'):
-        await interaction_or_ctx.followup.send(embed=embed, view=ClosedTicketView(emoji))
-    else:
-        await interaction_or_ctx.send(embed=embed, view=ClosedTicketView(emoji))
-    print(
-        f"[DEBUG] Тикет {channel.name} закрыт пользователем {interaction_or_ctx.user if hasattr(interaction_or_ctx, 'user') else interaction_or_ctx.author}")
+    embed.set_footer(text=FOOTER_TEXT)
+
+    await interaction.followup.send(embed=embed, view=ClosedTicketView())
+    print(f"[Aegis] Тикет {channel.name} закрыт пользователем {interaction.user}")
 
 
-# Функция удаления тикета
-async def delete_ticket(interaction_or_ctx):
-    channel = interaction_or_ctx.channel if hasattr(interaction_or_ctx,
-                                                    'channel') else interaction_or_ctx.message.channel
+async def delete_ticket(interaction: discord.Interaction):
+    """Удаление тикета с задержкой"""
+    channel = interaction.channel
+
     embed = discord.Embed(
-        title="Удаление....",
-        description="Тикет будет удалён через 60 секунд....",
-        color=16777215
+        title="🗑️ Удаление...",
+        description="Тикет будет удалён через 60 секунд...",
+        color=0xFF0000
     )
-    embed.set_footer(
-        text="MSF-043 TicketTool"
-    )
+    embed.set_footer(text=FOOTER_TEXT)
 
-    # Определяем эмодзи для отображения
-    if "ДТ" in channel.name or "Должностой" in channel.name:
-        emoji = "🎟"
-    elif "ОТ" in channel.name or "Операционный" in channel.name:
-        emoji = "🎫"
-    elif "РТ" in channel.name:
-        emoji = "💡"
-    else:
-        emoji = "🔗"
+    await interaction.response.send_message(embed=embed, view=CancelDeleteView())
 
-    message = await (interaction_or_ctx.response.send_message(embed=embed, view=CancelDeleteView(emoji)) if hasattr(
-        interaction_or_ctx, 'response') else interaction_or_ctx.send(embed=embed, view=CancelDeleteView(emoji)))
-    print(
-        f"[DEBUG] Запланировано удаление тикета {channel.name} пользователем {interaction_or_ctx.user if hasattr(interaction_or_ctx, 'user') else interaction_or_ctx.author}")
-
-    def check_cancel(interaction):
-        return interaction.user == interaction_or_ctx.user and interaction.data.get('custom_id') == 'cancel_delete'
+    # Ожидание отмены или удаление
+    def check(inter):
+        return inter.data.get('custom_id') == 'btn_cancel_delete' and inter.channel.id == channel.id
 
     try:
-        await bot.wait_for('interaction', check=check_cancel, timeout=60)
-        print(f"[DEBUG] Удаление тикета {channel.name} отменено пользователем")
+        await bot.wait_for('interaction', check=check, timeout=60)
+        print(f"[Aegis] Удаление тикета {channel.name} отменено")
     except asyncio.TimeoutError:
         try:
             await channel.delete()
-            print(f"[DEBUG] Тикет {channel.name} успешно удалён")
-        except discord.errors.Forbidden:
-            print(f"[ERROR] У бота нет прав для удаления канала {channel.name}")
-            if hasattr(interaction_or_ctx, 'response'):
-                await interaction_or_ctx.followup.send("У бота нет прав для удаления тикета.", ephemeral=True)
-            else:
-                await interaction_or_ctx.send("У бота нет прав для удаления тикета.")
-        except discord.errors.HTTPException as e:
-            print(f"[ERROR] Ошибка при удалении тикета {channel.name}: {e}")
-            if hasattr(interaction_or_ctx, 'response'):
-                await interaction_or_ctx.followup.send("Произошла ошибка при удалении тикета.", ephemeral=True)
-            else:
-                await interaction_or_ctx.send("Произошла ошибка при удалении тикета.")
-    finally:
-        try:
-            await message.delete()
-        except discord.errors.NotFound:
-            print(f"[DEBUG] Сообщение удаления для {channel.name} уже удалено")
+            print(f"[Aegis] Тикет {channel.name} удалён")
+        except Exception as e:
+            print(f"[Aegis] ✗ Ошибка при удалении тикета {channel.name}: {e}")
 
 
-# Команда !send
-@bot.command(name="send")
-async def send(ctx):
-    if ctx.channel.id != SEND_CHANNEL_ID:
-        await ctx.send(f'Команда `!send` работает только в канале <#{SEND_CHANNEL_ID}>.')
-        return
+# ============================================================
+# СЛЕШ-КОМАНДЫ (/c)
+# ============================================================
+class TicketCommands(app_commands.Group):
+    def __init__(self):
+        super().__init__(name="c", description="Управление тикетами")
 
-    if not any(ctx.guild.get_role(role_id) in ctx.author.roles for role_id in ADMIN_ROLE_IDS):
-        await ctx.send('У вас нет прав для выполнения этой команды. Только администраторы могут использовать `!send`.')
-        return
+    @app_commands.command(name="send", description="Отправить панель тикетов в канал")
+    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
+    async def send_panel(self, interaction: discord.Interaction):
+        """Отправка панели с кнопками тикетов"""
+        embed = discord.Embed(
+            title="🎫 СИСТЕМА ТИКЕТОВ ЧВК \"MSF-043\"",
+            description="Настоящий канал предназначен для открытия тикетов по установленным категориям.\n\n"
+                        "## ДОСТУПНЫЕ КАТЕГОРИИ:\n"
+                        "> 🛡️ **А.Жалоба** — жалобы на административный и офицерский состав\n"
+                        "> 👤 **О.Жалоба** — жалобы на оперативный состав\n"
+                        "> 💡 **Идея** — предложения по развитию компании\n"
+                        "> 📝 **Регистрация** — регистрация в составе ЧВК\n"
+                        "> 🤝 **Дипломатия** — дипломатические обращения\n\n"
+                        "## ПОРЯДОК РАССМОТРЕНИЯ\n"
+                        "После создания тикета и заполнения соответствующей формы необходимо упомянуть "
+                        "любое должностное лицо Административного состава и ожидать ответа.\n\n"
+                        "*Несоблюдение порядка подачи может привести к задержкам в рассмотрении.*",
+            color=0xFFFFFF
+        )
+        embed.set_footer(text=FOOTER_TEXT)
 
-    embed = discord.Embed(
-        description="# Тикеты\n\nДанный канал предназначен для открытия тикетов по определённым категориям - Административные жалобы, Оперативные жалобы, Предложения, Регистрация.\n\n> - Чтобы открыть тикет для жалобы на Административный и Офицерский состав (<@&1349365796970954834>, <@&1349365796970954833>, <@&1353493489526243369>, <@&1353493070192050357>, <@&1353492927833178172>, <@&1438600064166789180>, <@&1349365796970954832>), нажмите на кнопку ***«🎟・Тикет»***;\n> - Чтобы открыть тикет для жалобы на Оперативный состав (<@&1349365796949856273>, <@&1349365796949856274>), нажмите на кнопку ***«🎫・Тикет»***;\n> - Чтобы открыть тикет для предложений нажмите на кнопку ***«💡・Тикет»***;\n> - Чтобы открыть тикет для регистрации вас в ЧВК, нажмите на кнопку ***«🔗・Тикет»***.\n\n*__После создания тикета и написания жалобы/предложения упомяните любое должностное лицо Административного состава (<@&1349365796970954834>, <@&1349365796970954833>, <@&1353493489526243369>) и ожидайте ответа.__*",
-        color=16777215
-    )
-    embed.set_footer(
-        text="MSF-043 TicketTool"
-    )
+        view = MainTicketView()
+        await interaction.response.send_message(embed=embed, view=view)
+        print(f"[Aegis] Панель тикетов отправлена пользователем {interaction.user}")
 
-    view = TicketView()
-    await ctx.send(embed=embed, view=view)
+    @app_commands.command(name="clear", description="Сбросить счётчик тикетов")
+    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
+    async def clear_counter(self, interaction: discord.Interaction):
+        """Сброс счётчика тикетов"""
+        tickets = await load_tickets()
+        old_count = tickets['count']
+        tickets['count'] = 0
+        tickets['last_reset'] = datetime.now().strftime('%Y-%m-%d')
+        tickets['tickets'] = []
+        await save_tickets(tickets)
 
+        await interaction.response.send_message(f"✅ Счётчик тикетов сброшен. Было: {old_count}.", ephemeral=True)
 
-# Команда !clear
-@bot.command(name="clear")
-async def clear(ctx):
-    if ctx.channel.id != SEND_CHANNEL_ID:
-        await ctx.send(f'Команда `!clear` работает только в канале <#{SEND_CHANNEL_ID}>.')
-        return
+        log_channel = bot.get_channel(LOG_CHANNEL_ID)
+        if log_channel:
+            await log_channel.send(
+                f"📊 Счётчик тикетов сброшен пользователем {interaction.user.mention}. Было: {old_count}.")
 
-    if not any(ctx.guild.get_role(role_id) in ctx.author.roles for role_id in ADMIN_ROLE_IDS):
-        await ctx.send('У вас нет прав для выполнения этой команды. Только администраторы могут использовать !clear.')
-        return
+    @app_commands.command(name="close", description="Закрыть текущий тикет")
+    async def close_ticket_cmd(self, interaction: discord.Interaction):
+        """Закрытие тикета"""
+        channel = interaction.channel
 
-    tickets = await load_tickets()
-    old_count = tickets['count']
-    tickets['count'] = 0
-    tickets['last_reset'] = datetime.now().strftime('%Y-%m-%d')
-    tickets['tickets'] = []
-    await save_tickets(tickets)
+        # Проверка, что это канал тикета
+        valid_prefixes = ['ажалоба-', 'ожалоба-', 'идея-', 'регистрация-', 'дипломатия-']
+        is_ticket = any(channel.name.startswith(p) for p in valid_prefixes)
 
-    await ctx.send('Счетчик тикетов успешно сброшен.')
-    log_channel = bot.get_channel(LOG_CHANNEL_ID)
-    if log_channel:
-        await log_channel.send(
-            f'Счетчик тикетов сброшен пользователем {ctx.author.mention}. Было тикетов: {old_count}.')
-    print(f"[DEBUG] Счетчик тикетов сброшен пользователем {ctx.author}: было {old_count} тикетов, теперь 0")
+        if not is_ticket:
+            await interaction.response.send_message("❌ Эта команда работает только в каналах тикетов.", ephemeral=True)
+            return
 
+        # Проверка прав (создатель или админ)
+        user_id_from_channel = None
+        for overwrite in channel.overwrites:
+            if isinstance(overwrite, discord.Member) and overwrite != interaction.guild.me:
+                user_id_from_channel = overwrite.id
+                break
 
-# Команда !close
-@bot.command(name="close")
-async def close(ctx):
-    if not (ctx.channel.name.startswith('ДТ-') or ctx.channel.name.startswith('ОТ-') or ctx.channel.name.startswith(
-            'РТ-') or ctx.channel.name.startswith('Регистрация-')):
-        await ctx.send('Эта команда работает только в канале тикета.')
-        return
+        is_admin = any(interaction.guild.get_role(rid) in interaction.user.roles for rid in ADMIN_ROLE_IDS)
+        is_creator = interaction.user.id == user_id_from_channel
 
-    if ctx.author.id == int(ctx.channel.name.split('-')[-1]) or any(
-            ctx.guild.get_role(role_id) in ctx.author.roles for role_id in ADMIN_ROLE_IDS):
-        if "ДТ" in ctx.channel.name:
-            emoji = "🎟"
-        elif "ОТ" in ctx.channel.name:
-            emoji = "🎫"
-        elif "РТ" in ctx.channel.name:
-            emoji = "💡"
-        else:
-            emoji = "🔗"
-        await close_ticket(ctx, emoji)
-    else:
-        await ctx.send('У вас нет прав для закрытия этого тикета.')
+        if not is_admin and not is_creator:
+            await interaction.response.send_message("❌ У вас нет прав для закрытия этого тикета.", ephemeral=True)
+            return
 
+        await interaction.response.defer()
+        await close_ticket(interaction)
 
-# Команда !delete
-@bot.command(name="delete")
-async def delete(ctx):
-    if not (ctx.channel.name.startswith('ДТ-') or ctx.channel.name.startswith('ОТ-') or ctx.channel.name.startswith(
-            'РТ-') or ctx.channel.name.startswith('Регистрация-')):
-        await ctx.send('Эта команда работает только в канале тикета.')
-        return
+    @app_commands.command(name="delete", description="Удалить тикет (только для администраторов)")
+    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
+    async def delete_ticket_cmd(self, interaction: discord.Interaction):
+        """Удаление тикета"""
+        channel = interaction.channel
 
-    if not any(ctx.guild.get_role(role_id) in ctx.author.roles for role_id in ADMIN_ROLE_IDS):
-        await ctx.send(
-            'У вас нет прав для выполнения этой команды. Только администраторы могут использовать `!delete`.')
-        return
+        valid_prefixes = ['ажалоба-', 'ожалоба-', 'идея-', 'регистрация-', 'дипломатия-']
+        is_ticket = any(channel.name.startswith(p) for p in valid_prefixes)
 
-    await delete_ticket(ctx)
+        if not is_ticket:
+            await interaction.response.send_message("❌ Эта команда работает только в каналах тикетов.", ephemeral=True)
+            return
 
-
-# Команда !open с выбором типа
-@bot.command(name="open")
-async def open(ctx, ticket_type: str = None):
-    if ctx.channel.id != SEND_CHANNEL_ID:
-        await ctx.send(f'Команда `!open` работает только в канале <#{SEND_CHANNEL_ID}>.')
-        return
-
-    if not any(ctx.guild.get_role(role_id) in ctx.author.roles for role_id in ADMIN_ROLE_IDS):
-        await ctx.send('У вас нет прав для выполнения этой команды. Только администраторы могут использовать !open.')
-        return
-
-    if not ticket_type:
-        await ctx.send(
-            'Укажите тип тикета: `!open adm` (должностной), `!open op` (операционный), `!open sug` (предложения), `!open reg` (регистрация).')
-        return
-
-    ticket_type_map = {
-        'adm': 'admin_complaint',
-        'op': 'op_complaint',
-        'sug': 'suggestion',
-        'reg': 'registration'
-    }
-    if ticket_type not in ticket_type_map:
-        await ctx.send('Неверный тип тикета. Используйте: `!open adm`, `!open op`, `!open sug`, `!open reg`.')
-        return
-
-    await create_ticket(ctx, ticket_type_map[ticket_type])
+        await delete_ticket(interaction)
 
 
-# Событие готовности бота
+# ============================================================
+# СОБЫТИЯ БОТА
+# ============================================================
 @bot.event
 async def on_ready():
-    print(f'Бот {bot.user} готов к работе!')
+    print(f"[Aegis] ✓ Бот {bot.user} готов к работе!")
+    print(f"[Aegis] ✓ Серверов: {len(bot.guilds)}")
+
+    # Регистрируем персистентные view
+    bot.add_view(MainTicketView())
+    bot.add_view(TicketControlView())
+    bot.add_view(ClosedTicketView())
+    print("[Aegis] ✓ Персистентные view зарегистрированы")
 
 
-# Событие отключения бота
 @bot.event
 async def on_disconnect():
-    print("Бот отключён от Discord.")
+    print("[Aegis] Бот отключён от Discord")
 
 
-# Запуск бота
+# ============================================================
+# ЗАПУСК БОТА
+# ============================================================
 async def main():
+    load_dotenv()
     token = os.getenv("BOT_TOKEN")
     if not token:
-        print("[ERROR] Токен не найден. Установите переменную окружения BOT_TOKEN в файле .env")
+        print("[Aegis] ❌ Токен не найден. Установите переменную BOT_TOKEN в файле .env")
         return
-    
-    print(f"Запуск бота с токеном: {token}")
+
+    print(f"[Aegis] 🚀 Запуск бота...")
     try:
         await bot.start(token)
     except KeyboardInterrupt:
-        print("Остановка бота по запросу пользователя...")
+        print("\n[Aegis] 👋 Остановка бота по запросу...")
         await bot.close()
     except discord.errors.LoginFailure:
-        print("[ERROR] Неверный токен. Проверьте .env и сбросьте токен в Developer Portal.")
+        print("[Aegis] ❌ Неверный токен. Проверьте .env файл.")
     except Exception as e:
-        print(f"[ERROR] Произошла ошибка: {e}")
+        print(f"[Aegis] ❌ Ошибка: {e}")
     finally:
-        print("Завершение работы...")
+        print("[Aegis] 🛑 Завершение работы...")
         await bot.close()
 
 
 if __name__ == "__main__":
-    import aiofiles
-
     asyncio.run(main())
