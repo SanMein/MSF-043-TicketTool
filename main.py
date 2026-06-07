@@ -8,9 +8,7 @@ import json
 import aiofiles
 from datetime import datetime
 
-# ============================================================
 # НАСТРОЙКА БОТА
-# ============================================================
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -29,9 +27,7 @@ class AegisBot(commands.Bot):
 
 bot = AegisBot()
 
-# ============================================================
 # КОНФИГУРАЦИЯ
-# ============================================================
 TICKET_FILE = 'tickets.json'
 TICKET_CATEGORY_ID = 1399869304995971316
 ADMIN_ROLE_IDS = [
@@ -46,10 +42,7 @@ HISTORY_LIMIT = 10000
 FOOTER_TEXT = "Aegis // Αιγίς"
 GUILD_ID = 1349365796949856265
 
-
-# ============================================================
 # ЗАГРУЗКА/СОХРАНЕНИЕ ДАННЫХ
-# ============================================================
 async def load_tickets():
     if os.path.exists(TICKET_FILE):
         async with aiofiles.open(TICKET_FILE, 'r', encoding='utf-8') as f:
@@ -74,10 +67,7 @@ async def check_reset():
         print(f"[Aegis] Счётчик тикетов сброшен: {tickets['count']}, дата: {tickets['last_reset']}")
     return tickets
 
-
-# ============================================================
 # ЭМБЕДЫ ДЛЯ ТИКЕТОВ
-# ============================================================
 TICKET_EMBEDS = {
     "admin_complaint": {
         "title": "🛡️ А.Жалоба",
@@ -115,10 +105,7 @@ TICKET_EMBEDS = {
     }
 }
 
-
-# ============================================================
 # КЛАССЫ VIEW (КНОПКИ)
-# ============================================================
 class MainTicketView(discord.ui.View):
     """Главное меню с кнопками тикетов"""
 
@@ -251,10 +238,7 @@ class CancelDeleteView(discord.ui.View):
         embed.set_footer(text=FOOTER_TEXT)
         await interaction.response.edit_message(embed=embed, view=ClosedTicketView())
 
-
-# ============================================================
 # ФУНКЦИИ УПРАВЛЕНИЯ ТИКЕТАМИ
-# ============================================================
 async def create_ticket(interaction: discord.Interaction, ticket_type: str):
     """Создание нового тикета"""
     tickets = await check_reset()
@@ -391,10 +375,7 @@ async def delete_ticket(interaction: discord.Interaction):
         except Exception as e:
             print(f"[Aegis] ✗ Ошибка при удалении тикета {channel.name}: {e}")
 
-
-# ============================================================
 # СЛЕШ-КОМАНДЫ (/c)
-# ============================================================
 class TicketCommands(app_commands.Group):
     def __init__(self):
         super().__init__(name="c", description="Управление тикетами")
@@ -487,10 +468,7 @@ class TicketCommands(app_commands.Group):
 
         await delete_ticket(interaction)
 
-
-# ============================================================
 # СОБЫТИЯ БОТА
-# ============================================================
 @bot.event
 async def on_ready():
     print(f"[Aegis] ✓ Бот {bot.user} готов к работе!")
@@ -507,10 +485,7 @@ async def on_ready():
 async def on_disconnect():
     print("[Aegis] Бот отключён от Discord")
 
-
-# ============================================================
 # ЗАПУСК БОТА
-# ============================================================
 async def main():
     load_dotenv()
     token = os.getenv("BOT_TOKEN")
